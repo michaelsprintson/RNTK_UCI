@@ -9,12 +9,11 @@ def create_func(dic, printbool = False):
     N = int(dic["n_patrons1="])
     length = int(dic["n_entradas="])
     DATA = T.Placeholder((N, length), 'float32', name = "X")
-    x = DATA[:,0]
-    X = x*x[:, None]
-    n = X.shape[0]
-    print(n, N)
+    # x = DATA[:,0]
+    # X = x*x[:, None]
+    # n = X.shape[0]
 
-    rntkod = RNTK(dic, X, n) #could be flipped 
+    rntkod = RNTK(dic, DATA) #could be flipped 
 
     start = time.time()
     lin_ema = rntkod.create_func_for_diag()
@@ -23,9 +22,10 @@ def create_func(dic, printbool = False):
         print("time to create symjax", time.time() - start)
 
     return diag_func, rntkod
+    # return None, rntkod
 
 class RNTK():
-    def __init__(self, dic, X, n, dim_1 = None, dim_2 = None):
+    def __init__(self, dic, DATA, dim_1 = None, dim_2 = None):
         self.length = int(dic["n_entradas="])
         if (dim_1 is None) or (dim_2 is None):
             self.dim_1 = self.length
@@ -42,8 +42,7 @@ class RNTK():
         self.L = 1
         self.Lf = 0
         self.sv = 1
-        self.X = X
-        self.n = n
+        self.DATA = DATA
         self.N = int(dic["n_patrons1="])
         
 
@@ -97,26 +96,40 @@ class RNTK():
         return F,G
 
     # generates array of non-bc values (length is the number of points in matrix - number of dimensions)
-    def create_func_for_diag(self):
-
-        # NEW_DATA = self.reorganize_data()
-
-        ## change - bc should be a function that takes a passed in X? 
-
-        bc = self.sh ** 2 * self.sw ** 2 * T.eye(self.n, self.n) + (self.su ** 2)* self.X + self.sb ** 2 ## took out X || 
+    
+    def make_boundary_condition(self, X):
+        bc = self.sh ** 2 * self.sw ** 2 * T.eye(self.N, self.N) + (self.su ** 2)* X + self.sb ** 2 ## took out X || 
         single_boundary_condition = T.expand_dims(bc, axis = 0)
         # single_boundary_condition = T.expand_dims(T.Variable((bc), "float32", "boundary_condition"), axis = 0)
         boundary_condition = T.concatenate([single_boundary_condition, single_boundary_condition])
-        self.boundary_condition = boundary_condition
+        return boundary_condition
+    
+    def create_func_for_diag(self):
+        ## change - bc should be a function that takes a passed in X? 
+
+        NEW_DATA = self.reorganize_data()
+        NEW_DATA_ATTACHED = jnp.array(list(zip(NEW_DATA[:-1], NEW_DATA[1:])))
+
+        ## TEMPORARY - CONSTANT BOUNDARY CONDITION
+        x = self.DATA[:,0]
+        X = x*x[:, None]
+
+        self.boundary_condition = self.make_boundary_condition(X)
         # self.save_vts = {}
 
         ## prev_vals - (2,1) - previous phi and lambda values
         ## idx - where we are on the diagonal
-        def fn(prev_vals, idx, Xph):
+        # def fn(prev_vals, Xph, idx):
+        def fn(prev_vals, idx, data_idxs, DATAPH):
+        # def fn(prev_vals, idx, DATAPH):
 
             ## change - xph must now index the dataset instead of being passed in
-            # x = Xph['indexed']
-            # X = x*x[:, None]
+            # Xphdf = DATAPH[:,idx]
+            xTP = DATAPH[data_idxs[0][0]]
+            xT = DATAPH[data_idxs[0][1]]
+            xINNER = T.inner(xT, xTP)
+            # XTP = xTP*xTP[:, None] ## eq to <x^t, x^t> // inner product
+            # XT = xT*xT[:, None]
 
             # tiprime_iter = d1idx + idx
             # ti_iter = d2idx + idx
@@ -124,7 +137,7 @@ class RNTK():
             prev_phi = prev_vals[1]
             ## not boundary condition
             S, D = self.VT(prev_lambda)
-            new_lambda = self.sw ** 2 * S + self.su ** 2 * Xph + self.sb ** 2 ## took out an X
+            new_lambda = self.sw ** 2 * S + self.su ** 2 * xINNER + self.sb ** 2 ## took out an X
             new_phi = new_lambda + self.sw ** 2 * prev_phi * D
             lambda_expanded = T.expand_dims(new_lambda, axis = 0)
             phi_expanded = T.expand_dims(new_phi, axis = 0)
@@ -132,12 +145,14 @@ class RNTK():
             to_return = T.concatenate([lambda_expanded, phi_expanded])
 
             if idx in self.ends_of_calced_diags:
-                # self.save_vts[idx] = [S,D]
-                return boundary_condition, to_return
+                xTP_NEXT = DATAPH[data_idxs[1][0]]
+                xT_NEXT = DATAPH[data_idxs[1][1]]
+                xINNER_NEXT = T.inner(xT_NEXT, xTP_NEXT)
+                return self.make_boundary_condition(xINNER_NEXT), to_return
             return to_return, to_return
         
         last_ema, all_ema = T.scan(
-            fn, init =  boundary_condition, sequences=[jnp.arange(0, sum(self.dim_lengths) - self.dim_num)], non_sequences=[self.X]
+            fn, init =  self.boundary_condition, sequences=[jnp.arange(0, sum(self.dim_lengths) - self.dim_num), NEW_DATA_ATTACHED], non_sequences=[T.transpose(self.DATA)]
         )
         # if fbool:
             
@@ -168,9 +183,9 @@ class RNTK():
         prepended = T.concatenate([T.expand_dims(self.boundary_condition, axis = 0), ends_of_diags])
         return T.concatenate([prepended, T.expand_dims(self.boundary_condition, axis = 0)])
 
-    def reorganize_data(self, DATA, printbool = False):
+    def reorganize_data(self, printbool = False):
         TiPrimes, Tis = self.get_diag_indices(printbool = printbool)
-        reorganized_data = None
+        reorganized_data = []
         for diag_idx in range(1, self.dim_num - 1):
             TiP = TiPrimes[diag_idx]
             Ti = Tis[diag_idx]
@@ -179,9 +194,10 @@ class RNTK():
                 # we should never see 0 here, since those are reserved for boundary conditions
                 if printbool:
                     print(f"taking position {TiP + diag_pos} from TiP, {Ti + diag_pos} from Ti")
-                
-                reorganized_data = self.add_or_create(reorganized_data, T.concatenate([T.expand_dims(DATA[:,TiP + diag_pos], axis = 0), T.expand_dims(DATA[:,Ti + diag_pos], axis = 0)]))
-        return reorganized_data
+                reorganized_data.append((TiP + diag_pos, Ti + diag_pos))
+                # reorganized_data = self.add_or_create(reorganized_data, T.concatenate([T.expand_dims(self.DATA[:,TiP + diag_pos], axis = 0), T.expand_dims(self.DATA[:,Ti + diag_pos], axis = 0)]))
+        reorganized_data.append((0,0))
+        return jnp.array(reorganized_data)
 
     def compute_kernels(self, final_ema):
 

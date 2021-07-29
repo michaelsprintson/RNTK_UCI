@@ -89,6 +89,9 @@ class RNTK():
         boundary_condition = T.concatenate([single_boundary_condition, single_boundary_condition]) #one for phi and lambda
 
         def fn(prev_vals, idx, Xph):
+
+            ## change - xph must now index the dataset instead of being passed in
+
             # tiprime_iter = d1idx + idx
             # ti_iter = d2idx + idx
             prev_lambda = prev_vals[0]
