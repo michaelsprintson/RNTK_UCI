@@ -7,17 +7,19 @@ import time
 
 def create_func(dic, printbool = False):
     N = int(dic["n_patrons1="])
-    length = int(dic["n_entradas="])
-    DATA = T.Placeholder((N, length), 'float32', name = "X")
+    ti_length = int(dic["n_entradasTi="])
+    ti_prime_length = int(dic["n_entradasTiP="])
+    DATA = T.Placeholder((N, ti_length), 'float32', name = "X")
+    DATAPRIME = T.Placeholder((N, ti_prime_length), 'float32', name = "X")
     # x = DATA[:,0]
     # X = x*x[:, None]
     # n = X.shape[0]
 
-    rntkod = RNTK(dic, DATA) #could be flipped 
+    rntkod = RNTK(dic, DATA, DATAPRIME) #could be flipped 
 
     start = time.time()
     lin_ema = rntkod.create_func_for_diag()
-    diag_func = symjax.function(DATA, outputs=lin_ema)
+    diag_func = symjax.function(DATA, DATAPRIME, outputs=lin_ema)
     if printbool:
         print("time to create symjax", time.time() - start)
 
@@ -25,7 +27,7 @@ def create_func(dic, printbool = False):
     # return None, rntkod
 
 class RNTK():
-    def __init__(self, dic, DATA):
+    def __init__(self, dic, DATA, DATAPRIME):
         self.dim_1 = dic["n_entradasTiP="]
         self.dim_2 = dic["n_entradasTi="]
         self.dim_num =self.dim_1 + self.dim_2 + 1
@@ -37,6 +39,7 @@ class RNTK():
         self.Lf = 0
         self.sv = 1
         self.DATA = DATA
+        self.DATAPRIME = DATAPRIME
         self.N = int(dic["n_patrons1="])
         
 
@@ -114,12 +117,12 @@ class RNTK():
         ## prev_vals - (2,1) - previous phi and lambda values
         ## idx - where we are on the diagonal
         # def fn(prev_vals, Xph, idx):
-        def fn(prev_vals, idx, data_idxs, DATAPH):
+        def fn(prev_vals, idx, data_idxs, DATAPH, DATAPRIMEPH):
         # def fn(prev_vals, idx, DATAPH):
 
             ## change - xph must now index the dataset instead of being passed in
             # Xphdf = DATAPH[:,idx]
-            xTP = DATAPH[data_idxs[0][0]]
+            xTP = DATAPRIMEPH[data_idxs[0][0]]
             xT = DATAPH[data_idxs[0][1]]
             xINNER = T.inner(xT, xTP)
             # XTP = xTP*xTP[:, None] ## eq to <x^t, x^t> // inner product
@@ -146,7 +149,7 @@ class RNTK():
             return to_return, to_return
         
         last_ema, all_ema = T.scan(
-            fn, init =  self.boundary_condition, sequences=[jnp.arange(0, sum(self.dim_lengths) - self.dim_num), NEW_DATA_ATTACHED], non_sequences=[T.transpose(self.DATA)]
+            fn, init =  self.boundary_condition, sequences=[jnp.arange(0, sum(self.dim_lengths) - self.dim_num), NEW_DATA_ATTACHED], non_sequences=[T.transpose(self.DATA), T.transpose(self.DATAPRIME)]
         )
         # if fbool:
             
