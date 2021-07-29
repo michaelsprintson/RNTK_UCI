@@ -25,16 +25,10 @@ def create_func(dic, printbool = False):
     # return None, rntkod
 
 class RNTK():
-    def __init__(self, dic, DATA, dim_1 = None, dim_2 = None):
-        self.length = int(dic["n_entradas="])
-        if (dim_1 is None) or (dim_2 is None):
-            self.dim_1 = self.length
-            self.dim_2 = self.length
-            self.dim_num = self.length*2 + 1
-        else:
-            self.dim_1 = dim_1
-            self.dim_2 = dim_2
-            self.dim_num =dim_1 + dim_2 + 1
+    def __init__(self, dic, DATA):
+        self.dim_1 = dic["n_entradasTiP="]
+        self.dim_2 = dic["n_entradasTi="]
+        self.dim_num =self.dim_1 + self.dim_2 + 1
         self.sw = 1
         self.su = 1
         self.sb = 1
