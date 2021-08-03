@@ -27,10 +27,14 @@ def create_func(dic, printbool = False):
     # return None, rntkod
 
 class RNTK():
-    def __init__(self, dic, DATA, DATAPRIME):
-        self.dim_1 = dic["n_entradasTiP="]
-        self.dim_2 = dic["n_entradasTi="]
-        self.dim_num =self.dim_1 + self.dim_2 + 1
+    def __init__(self, dic, DATA, DATAPRIME, simple = False):
+        if not simple:
+            self.dim_1 = dic["n_entradasTiP="]
+            self.dim_2 = dic["n_entradasTi="]
+            self.dim_num =self.dim_1 + self.dim_2 + 1
+            self.DATA = DATA
+            self.DATAPRIME = DATAPRIME
+            self.N = int(dic["n_patrons1="])
         self.sw = 1
         self.su = 1
         self.sb = 1
@@ -38,20 +42,17 @@ class RNTK():
         self.L = 1
         self.Lf = 0
         self.sv = 1
-        self.DATA = DATA
-        self.DATAPRIME = DATAPRIME
-        self.N = int(dic["n_patrons1="])
-        
+        if not simple:
 
-        clip_num = min(self.dim_1, self.dim_2) + 1
-        middle_list = np.zeros(self.dim_num-(2 * clip_num) + 1)
-        middle_list.fill(clip_num)
-        self.dim_lengths = np.concatenate([np.arange(1,clip_num), middle_list, np.arange(clip_num, 0, -1)])
+            clip_num = min(self.dim_1, self.dim_2) + 1
+            middle_list = np.zeros(self.dim_num-(2 * clip_num) + 1)
+            middle_list.fill(clip_num)
+            self.dim_lengths = np.concatenate([np.arange(1,clip_num), middle_list, np.arange(clip_num, 0, -1)])
 
-        self.how_many_before = [sum(self.dim_lengths[:j]) for j in range(0, len(self.dim_lengths))]
+            self.how_many_before = [sum(self.dim_lengths[:j]) for j in range(0, len(self.dim_lengths))]
 
-        length_betw = (self.dim_lengths - 1)[1:-1]
-        self.ends_of_calced_diags = np.array([sum(length_betw[:j]) for j in range(0, len(length_betw)+1)])[1:] - 1
+            length_betw = (self.dim_lengths - 1)[1:-1]
+            self.ends_of_calced_diags = np.array([sum(length_betw[:j]) for j in range(0, len(length_betw)+1)])[1:] - 1
 
     def get_diag_indices(self, jnpbool = False, printbool = False):
         switch_flag = 1
