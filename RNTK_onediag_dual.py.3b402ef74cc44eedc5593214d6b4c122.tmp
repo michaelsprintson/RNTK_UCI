@@ -54,12 +54,12 @@ class RNTK():
             length_betw = (self.dim_lengths - 1)[1:-1]
             self.ends_of_calced_diags = np.array([sum(length_betw[:j]) for j in range(0, len(length_betw)+1)])[1:] - 1
 
-    def alg1_VT(self, M):
+    def alg1_VT(self, M): #here i will use M as the previous little q
         A = T.diag(M)  # GP_old is in R^{n*n} having the output gp kernel
         # of all pairs of data in the data set
         B = A * A[:, None]
         C = T.sqrt(B)  # in R^{n*n}
-        D = M / C  # this is lamblda in ReLU analyrucal formula
+        D = M / C  # this is lambda in ReLU analyrucal formula (c in alg)
         E = T.clip(D, -1, 1)  # clipping E between -1 and 1 for numerical stability.
         F = (1 / (2 * np.pi)) * (E * (np.pi - T.arccos(E)) + T.sqrt(1 - E ** 2)) * C
         G = (np.pi - T.arccos(E)) / (2 * np.pi)
