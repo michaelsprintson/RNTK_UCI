@@ -44,6 +44,9 @@ class RNTK():
         self.sv = 1
         if not simple:
 
+            self.qt = self.compute_q(self.DATA)
+            self.qtprime = self.compute_q(self.DATAPRIME)
+
             clip_num = min(self.dim_1, self.dim_2) + 1
             middle_list = np.zeros(self.dim_num-(2 * clip_num) + 1)
             middle_list.fill(clip_num)
@@ -73,6 +76,21 @@ class RNTK():
         F = (1 / (2 * np.pi)) * (E * (np.pi - np.arccos(E)) + np.sqrt(1 - E ** 2)) * C
         G = (np.pi - np.arccos(E)) / (2 * np.pi)
         return F,G
+
+    def compute_q(self, DATA):
+        DATAT = T.transpose(DATA)
+        xz = DATAT[0]
+        init = self.su * 2 * T.linalg.norm(xz, ord = 2) + self.sb**2 + self.sh**2
+
+        def scan_func(prevq, MINIDATAT):
+            # the trick to this one is to use the original VT
+            S, _ = self.alg1_VT(T.full((1,1), prevq)) # -> M is K3 
+            # print(MINIDATAT)
+            newq = (self.sw*2 * S + self.su * 2 * T.linalg.norm(MINIDATAT, ord = 2) + self.sb**2)[0][0]
+            return newq, newq
+        
+        last_ema, all_ema = T.scan(scan_func, init = init, sequences = [DATAT[1:]])
+        return T.concatenate([T.expand_dims(init, axis = 0), all_ema])
     
     def get_diag_indices(self, jnpbool = False, printbool = False):
         switch_flag = 1
@@ -143,7 +161,7 @@ class RNTK():
             prev_lambda = prev_vals[0]
             prev_phi = prev_vals[1]
             ## not boundary condition
-            S, D = self.VT(prev_lambda)
+            S, D = self.alg2_VT(self.qt[data_idxs[0][1]], self.qtprime[data_idxs[0][0]] ,prev_lambda)
             new_lambda = self.sw ** 2 * S + self.su ** 2 * xINNER + self.sb ** 2 ## took out an X
             new_phi = new_lambda + self.sw ** 2 * prev_phi * D
             lambda_expanded = T.expand_dims(new_lambda, axis = 0)
