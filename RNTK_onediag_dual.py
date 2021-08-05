@@ -173,8 +173,9 @@ class RNTK():
             new_phi = new_lambda + self.sw ** 2 * prev_phi * D
 
             #compute kernels
-            ret_K = prev_K + prev_K
-            ret_theta = prev_theta + prev_theta #TODO
+            S_kernel, D_kernel = self.alg2_VT(qtph[data_idxs[0][1]], qtprimeph[data_idxs[0][0]])
+            ret_K = prev_K + self.sv^2 * S_kernel#get current lamnda, get current qtph and qtprimeph
+            ret_theta = prev_theta + self.sv^2 * S_kernel + self.sv^2 * D_kernel * new_phi #TODO
 
             if idx in self.ends_of_calced_diags:
                 xTP_NEXT = DATAPH[data_idxs[1][0]]
