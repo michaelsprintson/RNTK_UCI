@@ -18,13 +18,15 @@ def create_func(dic, printbool = False):
     rntkod = RNTK(dic, DATA, DATAPRIME) #could be flipped 
 
     start = time.time()
-    lin_ema = rntkod.create_func_for_diag()
-    diag_func = symjax.function(DATA, DATAPRIME, outputs=lin_ema)
+    kernels_ema = rntkod.create_func_for_diag()
+    diag_func = symjax.function(DATA, DATAPRIME, outputs=kernels_ema)
     if printbool:
         print("time to create symjax", time.time() - start)
 
     return diag_func, rntkod
     # return None, rntkod
+
+create_T_list = lambda vals: T.concatenate([T.expand_dims(i, axis = 0) for i in vals])
 
 class RNTK():
     def __init__(self, dic, DATA, DATAPRIME, simple = False):
@@ -69,12 +71,12 @@ class RNTK():
         return F,G
 
     def alg2_VT(self, Qx, Qxprime, M): #K1, K2, K3
-        B = np.outer(Qx, Qxprime)
-        C = np.sqrt(B)# in R^{n*n}
+        B = T.outer(Qx, Qxprime)
+        C = T.sqrt(B)# in R^{n*n}
         D = M / C  # this is lamblda in ReLU analyrucal formula
         E = np.clip(D, -1, 1) # clipping E between -1 and 1 for numerical stability.
-        F = (1 / (2 * np.pi)) * (E * (np.pi - np.arccos(E)) + np.sqrt(1 - E ** 2)) * C
-        G = (np.pi - np.arccos(E)) / (2 * np.pi)
+        F = (1 / (2 * np.pi)) * (E * (np.pi - T.arccos(E)) + T.sqrt(1 - E ** 2)) * C
+        G = (np.pi - T.arccos(E)) / (2 * np.pi)
         return F,G
 
     def compute_q(self, DATA):
@@ -124,10 +126,10 @@ class RNTK():
     
     def make_boundary_condition(self, X):
         bc = self.sh ** 2 * self.sw ** 2 * T.eye(self.N, self.N) + (self.su ** 2)* X + self.sb ** 2 ## took out X || 
-        single_boundary_condition = T.expand_dims(bc, axis = 0)
+        # single_boundary_condition = T.expand_dims(bc, axis = 0)
         # single_boundary_condition = T.expand_dims(T.Variable((bc), "float32", "boundary_condition"), axis = 0)
-        boundary_condition = T.concatenate([single_boundary_condition, single_boundary_condition])
-        return boundary_condition
+        # boundary_condition = T.concatenate([single_boundary_condition, single_boundary_condition])
+        return bc
     
     def create_func_for_diag(self):
         ## change - bc should be a function that takes a passed in X? 
@@ -139,13 +141,16 @@ class RNTK():
         x = self.DATA[:,0]
         X = x*x[:, None]
 
-        self.boundary_condition = self.make_boundary_condition(X)
-        # self.save_vts = {}
-
+        boundary_condition = self.make_boundary_condition(X)
+        # print(boundary_condition)
+        # print( T.empty((self.N, self.N)))
+        initial_conditions = create_T_list([boundary_condition, boundary_condition, T.empty((self.N, self.N)), T.empty((self.N, self.N))])
+        # print('got past first create list')
+        
         ## prev_vals - (2,1) - previous phi and lambda values
         ## idx - where we are on the diagonal
         # def fn(prev_vals, Xph, idx):
-        def fn(prev_vals, idx, data_idxs, DATAPH, DATAPRIMEPH):
+        def fn(prev_vals, idx, data_idxs, DATAPH, DATAPRIMEPH, qtph, qtprimeph):
         # def fn(prev_vals, idx, DATAPH):
 
             ## change - xph must now index the dataset instead of being passed in
@@ -160,53 +165,42 @@ class RNTK():
             # ti_iter = d2idx + idx
             prev_lambda = prev_vals[0]
             prev_phi = prev_vals[1]
+            prev_K = prev_vals[2]
+            prev_theta = prev_vals[3]
             ## not boundary condition
-            S, D = self.alg2_VT(self.qt[data_idxs[0][1]], self.qtprime[data_idxs[0][0]] ,prev_lambda)
+            S, D = self.alg2_VT(qtph[data_idxs[0][1] - 1], qtprimeph[data_idxs[0][0] - 1] ,prev_lambda)
             new_lambda = self.sw ** 2 * S + self.su ** 2 * xINNER + self.sb ** 2 ## took out an X
             new_phi = new_lambda + self.sw ** 2 * prev_phi * D
-            lambda_expanded = T.expand_dims(new_lambda, axis = 0)
-            phi_expanded = T.expand_dims(new_phi, axis = 0)
 
-            to_return = T.concatenate([lambda_expanded, phi_expanded])
+            #compute kernels
+            ret_K = prev_K + prev_K
+            ret_theta = prev_theta + prev_theta #TODO
 
             if idx in self.ends_of_calced_diags:
                 xTP_NEXT = DATAPH[data_idxs[1][0]]
                 xT_NEXT = DATAPH[data_idxs[1][1]]
                 xINNER_NEXT = T.inner(xT_NEXT, xTP_NEXT)
-                return self.make_boundary_condition(xINNER_NEXT), to_return
-            return to_return, to_return
-        
-        last_ema, all_ema = T.scan(
-            fn, init =  self.boundary_condition, sequences=[jnp.arange(0, sum(self.dim_lengths) - self.dim_num), NEW_DATA_ATTACHED], non_sequences=[T.transpose(self.DATA), T.transpose(self.DATAPRIME)]
-        )
-        # if fbool:
+                new_bc = self.make_boundary_condition(xINNER_NEXT)
+                ret_lambda = ret_phi = new_bc 
+            else:
+                ret_lambda = new_lambda
+                ret_phi = new_phi
             
-        #     return all_ema, f
-        return self.compute_kernels(all_ema)
-
-
-    def diag_func_wrapper(self, dim_1_idx, dim_2_idx, fbool = False, jmode = False):
-        # print('tests')
-        f = self.create_func_for_diag(dim_1_idx, dim_2_idx, function = fbool, jmode = jmode)
-        # print('teste')
-        if fbool:
-            return f(np.arange(0,min(self.dim_1, self.dim_2) - (dim_1_idx + dim_2_idx)), self.dim_1, self.dim_2, dim_1_idx, dim_2_idx, self.n)
-        return f
-
-    def add_or_create(self, tlist, titem):
-        if tlist is None:
-            return T.expand_dims(titem, axis = 0)
-        else:
-            return T.concatenate([tlist, T.expand_dims(titem, axis = 0)])
-
-    def get_ends_of_diags(self, result_ema):
-        # ends_of_diags = None
-        # for end in self.ends_of_calced_diags:
-        #     index_test = result_ema[int(end)]
-        #     ends_of_diags = self.add_or_create(ends_of_diags, index_test)
-        ends_of_diags = result_ema[self.ends_of_calced_diags.astype('int')]
-        prepended = T.concatenate([T.expand_dims(self.boundary_condition, axis = 0), ends_of_diags])
-        return T.concatenate([prepended, T.expand_dims(self.boundary_condition, axis = 0)])
+            to_carry = create_T_list([ret_lambda, ret_phi, ret_K, ret_theta])
+            # print('got poast second create list')
+            to_return = to_carry[2:4] #just take lambda and phi 
+            
+            return to_carry, np.array(())
+        
+        carry_ema, _ = T.scan(
+            fn, init =  initial_conditions, sequences=[jnp.arange(0, sum(self.dim_lengths) - self.dim_num), NEW_DATA_ATTACHED], non_sequences=[T.transpose(self.DATA), T.transpose(self.DATAPRIME), self.qt, self.qtprime]
+        )
+        
+        return self.add_boundary_kernels(carry_ema[2:4]) ## so here, the output will be the added up kernels except for the boundary conditions
+        # return self.compute_kernels(all_ema)
+    
+    def add_boundary_kernels(self, inside_kernels):
+        return inside_kernels # TODO
 
     def reorganize_data(self, printbool = False):
         TiPrimes, Tis = self.get_diag_indices(printbool = printbool)
@@ -224,17 +218,43 @@ class RNTK():
         reorganized_data.append((0,0))
         return jnp.array(reorganized_data)
 
+
+    # def diag_func_wrapper(self, dim_1_idx, dim_2_idx, fbool = False, jmode = False):
+    #     # print('tests')
+    #     f = self.create_func_for_diag(dim_1_idx, dim_2_idx, function = fbool, jmode = jmode)
+    #     # print('teste')
+    #     if fbool:
+    #         return f(np.arange(0,min(self.dim_1, self.dim_2) - (dim_1_idx + dim_2_idx)), self.dim_1, self.dim_2, dim_1_idx, dim_2_idx, self.n)
+    #     return f
+
+    # def add_or_create(self, tlist, titem):
+    #     if tlist is None:
+    #         return T.expand_dims(titem, axis = 0)
+    #     else:
+    #         return T.concatenate([tlist, T.expand_dims(titem, axis = 0)])
+
+    # def get_ends_of_diags(self, result_ema):
+    #     # ends_of_diags = None
+    #     # for end in self.ends_of_calced_diags:
+    #     #     index_test = result_ema[int(end)]
+    #     #     ends_of_diags = self.add_or_create(ends_of_diags, index_test)
+    #     ends_of_diags = result_ema[self.ends_of_calced_diags.astype('int')]
+    #     prepended = T.concatenate([T.expand_dims(self.boundary_condition, axis = 0), ends_of_diags])
+    #     return T.concatenate([prepended, T.expand_dims(self.boundary_condition, axis = 0)])
+
+
+
     def compute_kernels(self, final_ema):
 
         diag_ends = self.get_ends_of_diags(final_ema)
 
-        S_init, D_init = self.VT(diag_ends[0][0])
+        S_init, D_init = self.alg1_VT(diag_ends[0][0])
         init_Kappa  = self.sv ** 2 * S_init
         init_Theta = init_Kappa + self.sv ** 2 * diag_ends[0][1] * D_init
         init_list = T.concatenate([T.expand_dims(init_Kappa, axis = 0), T.expand_dims(init_Theta, axis = 0)])
 
         def map_test(gp_rntk_sum, gp_rntk):
-            S, D = self.VT(gp_rntk[0])
+            S, D = self.alg1_VT(gp_rntk[0])
             ret1 = self.sv ** 2 * S
             ret2 = ret1 + self.sv ** 2 * gp_rntk[1] * D
             gp_rntk_sum = T.index_add(gp_rntk_sum,0, ret1)
@@ -245,6 +265,7 @@ class RNTK():
         final_K_T, inter_results = T.scan(
                     map_test, init =  init_list, sequences=[diag_ends[1:]]
                 )
+        self.test = final_K_T
         return final_K_T
 
 
