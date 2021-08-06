@@ -195,7 +195,6 @@ class RNTK():
             
             to_carry = create_T_list([ret_lambda, ret_phi, ret_K, ret_theta])
             # print('got poast second create list')
-            to_return = to_carry[2:4] #just take lambda and phi 
             
             return to_carry, np.array(())
         
