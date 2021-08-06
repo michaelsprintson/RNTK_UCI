@@ -147,11 +147,12 @@ class RNTK():
 
         boundary_condition = self.make_boundary_condition(X)
         
-        #lets create the inital kernels - should be starting with top right
+        # #lets create the inital kernels - should be starting with top right
         temp_K, temp_theta = self.compute_kernels(self.qt, self.qtprime, 0, self.dim_1, boundary_condition, boundary_condition, T.empty((self.N, self.N)), T.empty((self.N, self.N)))
         init_K, init_theta = self.compute_kernels(self.qt, self.qtprime, 0, self.dim_1 - 1, boundary_condition, boundary_condition, temp_K, temp_theta)
 
         initial_conditions = create_T_list([boundary_condition, boundary_condition, init_K, init_theta])
+        # initial_conditions = create_T_list([boundary_condition, boundary_condition, T.empty((self.N, self.N)), T.empty((self.N, self.N))])
         
         ## prev_vals - (4,self.N,self.N) - previous phi, lambda, and the two kernel values
         ## idx - where we are on the diagonal
@@ -174,13 +175,20 @@ class RNTK():
             S_kernel, D_kernel = self.alg2_VT(qtph[data_idxs[0][1]], qtprimeph[data_idxs[0][0]], new_lambda)
             ret_K = prev_K + self.sv**2 * S_kernel#get current lamnda, get current qtph and qtprimeph
             ret_theta = prev_theta + self.sv**2 * S_kernel + self.sv**2 * D_kernel * new_phi #TODO
+            
+            # ret_K, ret_theta = self.compute_kernels(self.qt, self.qtprime, data_idxs[0][1], data_idxs[0][0] - 1, new_lambda, new_phi, prev_K, prev_lambda)
 
             if idx in self.ends_of_calced_diags:
-                xTP_NEXT = DATAPH[data_idxs[1][0]]
+                # so here we are at the end of the diagonal and data_idxs[1]
+                xTP_NEXT = DATAPRIMEPH[data_idxs[1][0]]
                 xT_NEXT = DATAPH[data_idxs[1][1]]
                 xINNER_NEXT = T.inner(xT_NEXT, xTP_NEXT)
                 new_bc = self.make_boundary_condition(xINNER_NEXT)
                 ret_lambda = ret_phi = new_bc 
+
+                S_bc_kernel, D_bc_kernel = self.alg2_VT(qtph[data_idxs[1][1]], qtprimeph[data_idxs[1][0]], ret_lambda)
+                ret_K = ret_K + self.sv**2 * S_bc_kernel#get current lamnda, get current qtph and qtprimeph
+                ret_theta = ret_theta + self.sv**2 * S_bc_kernel + self.sv**2 * D_bc_kernel * ret_phi #TODO
             else:
                 ret_lambda = new_lambda
                 ret_phi = new_phi
@@ -195,13 +203,8 @@ class RNTK():
             fn, init =  initial_conditions, sequences=[jnp.arange(0, sum(self.dim_lengths) - self.dim_num), NEW_DATA_ATTACHED], non_sequences=[T.transpose(self.DATA), T.transpose(self.DATAPRIME), self.qt, self.qtprime]
         )
         
-        return self.add_boundary_kernels(carry_ema[2:4]) ## so here, the output will be the added up kernels except for the boundary conditions
+        return carry_ema[2:4] ## so here, the output will be the added up kernels except for the boundary conditions
         # return self.compute_kernels(all_ema)
-    
-    def add_boundary_kernels(self, inside_kernels):
-        #first thing to do - find indexes of boundary conditions (this is simple, we already have it)
-
-        return inside_kernels # TODO
 
     def reorganize_data(self, printbool = False):
         TiPrimes, Tis = self.get_diag_indices(printbool = printbool)
