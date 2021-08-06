@@ -37,13 +37,13 @@ class RNTK():
             self.DATA = DATA
             self.DATAPRIME = DATAPRIME
             self.N = int(dic["n_patrons1="])
-        self.sw = 1
-        self.su = 1
-        self.sb = 1
-        self.sh = 1
-        self.L = 1
-        self.Lf = 0
-        self.sv = 1
+        self.sw = 1 #sqrt 2 (1.4) - FIXED
+        self.su = 1 #[0.1,0.5,1] - SEARCH
+        self.sb = 1 #[0, 0.2, 0.5] - SEARCH
+        self.sh = 1 #[0, 0.5, 1] - SEARCH
+        self.sv = 1 #1 - FIXED
+        self.L = 1 #1 - FIXED
+        self.Lf = 0 #0 - FIXED
         if not simple:
 
             self.qt = self.compute_q(self.DATA)
@@ -59,7 +59,7 @@ class RNTK():
             length_betw = (self.dim_lengths - 1)[1:-1]
             self.ends_of_calced_diags = np.array([sum(length_betw[:j]) for j in range(0, len(length_betw)+1)])[1:] - 1
 
-    def alg1_VT(self, M): #here i will use M as the previous little q
+    def alg1_VT(self, M): #here i will use M as the previous little q ////// NxN, same value for every row
         A = T.diag(M)  # GP_old is in R^{n*n} having the output gp kernel
         # of all pairs of data in the data set
         B = A * A[:, None]
@@ -82,13 +82,19 @@ class RNTK():
     def compute_q(self, DATA):
         DATAT = T.transpose(DATA)
         xz = DATAT[0]
-        init = self.su * 2 * T.linalg.norm(xz, ord = 2) + self.sb**2 + self.sh**2
+        # print(xz)
+        init = self.su * 2 * T.linalg.norm(T.expand_dims(xz, axis = 0), ord = 2, axis = 0) + self.sb**2 + self.sh**2
+        # print("init", init)
+        # init = self.su * 2 * T.linalg.norm(xz, ord = 2) + self.sb**2 + self.sh**2 #make this a vectorized function 
 
-        def scan_func(prevq, MINIDATAT):
-            # the trick to this one is to use the original VT
-            S, _ = self.alg1_VT(T.full((1,1), prevq)) # -> M is K3 
+        def scan_func(prevq, MINIDATAT): #MINIDATAT shuold be a vector of lenght N
             # print(MINIDATAT)
-            newq = (self.sw*2 * S + self.su * 2 * T.linalg.norm(MINIDATAT, ord = 2) + self.sb**2)[0][0]
+            # the trick to this one is to use the original VT
+            # S, _ = self.alg1_VT(prevq) # -> M is K3 
+            S = prevq
+            # newq = self.su * 2 * T.linalg.norm(T.expand_dims(xz, axis = 0), ord = 2, axis = 0) + self.sb**2 + self.sh**2
+            newq = self.sw*2 * S + self.su * 2 * T.linalg.norm(T.expand_dims(MINIDATAT, axis = 0), ord = 2, axis = 0) + self.sb**2#TODO: same vectorization (pointwise on MINIDATAT)
+            # print("newq", newq)
             return newq, newq
         
         last_ema, all_ema = T.scan(scan_func, init = init, sequences = [DATAT[1:]])
@@ -158,15 +164,17 @@ class RNTK():
         ## idx - where we are on the diagonal
         def fn(prev_vals, idx, data_idxs, DATAPH, DATAPRIMEPH, qtph, qtprimeph):
 
-            xTP = DATAPRIMEPH[data_idxs[0][0]]
-            xT = DATAPH[data_idxs[0][1]]
-            xINNER = T.inner(xT, xTP)
+            xTP = DATAPRIMEPH[data_idxs[0][0]] #N1
+            xT = DATAPH[data_idxs[0][1]] #N2
+            xINNER = T.inner(xT, xTP) #N1 x N2
 
             prev_lambda = prev_vals[0]
             prev_phi = prev_vals[1]
             prev_K = prev_vals[2]
             prev_theta = prev_vals[3]
             ## not boundary condition
+            # print(qtph[data_idxs[0][1] - 1])
+            # print(qtprimeph[data_idxs[0][0] - 1])
             S, D = self.alg2_VT(qtph[data_idxs[0][1] - 1], qtprimeph[data_idxs[0][0] - 1] ,prev_lambda)
             new_lambda = self.sw ** 2 * S + self.su ** 2 * xINNER + self.sb ** 2 ## took out an X
             new_phi = new_lambda + self.sw ** 2 * prev_phi * D
