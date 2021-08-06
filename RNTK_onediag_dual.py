@@ -130,39 +130,37 @@ class RNTK():
         # single_boundary_condition = T.expand_dims(T.Variable((bc), "float32", "boundary_condition"), axis = 0)
         # boundary_condition = T.concatenate([single_boundary_condition, single_boundary_condition])
         return bc
+
+    def compute_kernels(self, qtph, qtprimeph, qtidx, qtprimeidx, cur_lambda, cur_phi, prev_K, prev_theta):
+        S_kernel, D_kernel = self.alg2_VT(qtph[qtidx], qtprimeph[qtprimeidx], cur_lambda)
+        ret_K = prev_K + self.sv**2 * S_kernel#get current lamnda, get current qtph and qtprimeph
+        ret_theta = prev_theta + self.sv**2 * S_kernel + self.sv**2 * D_kernel * cur_phi 
+        return ret_K, ret_theta
     
     def create_func_for_diag(self):
-        ## change - bc should be a function that takes a passed in X? 
 
         NEW_DATA = self.reorganize_data()
         NEW_DATA_ATTACHED = jnp.array(list(zip(NEW_DATA[:-1], NEW_DATA[1:])))
 
-        ## TEMPORARY - CONSTANT BOUNDARY CONDITION
         x = self.DATA[:,0]
         X = x*x[:, None]
 
         boundary_condition = self.make_boundary_condition(X)
-        # print(boundary_condition)
-        # print( T.empty((self.N, self.N)))
-        initial_conditions = create_T_list([boundary_condition, boundary_condition, T.empty((self.N, self.N)), T.empty((self.N, self.N))])
-        # print('got past first create list')
         
-        ## prev_vals - (2,1) - previous phi and lambda values
-        ## idx - where we are on the diagonal
-        # def fn(prev_vals, Xph, idx):
-        def fn(prev_vals, idx, data_idxs, DATAPH, DATAPRIMEPH, qtph, qtprimeph):
-        # def fn(prev_vals, idx, DATAPH):
+        #lets create the inital kernels - should be starting with top right
+        temp_K, temp_theta = self.compute_kernels(self.qt, self.qtprime, 0, self.dim_1, boundary_condition, boundary_condition, T.empty((self.N, self.N)), T.empty((self.N, self.N)))
+        init_K, init_theta = self.compute_kernels(self.qt, self.qtprime, 0, self.dim_1 - 1, boundary_condition, boundary_condition, temp_K, temp_theta)
 
-            ## change - xph must now index the dataset instead of being passed in
-            # Xphdf = DATAPH[:,idx]
+        initial_conditions = create_T_list([boundary_condition, boundary_condition, init_K, init_theta])
+        
+        ## prev_vals - (4,self.N,self.N) - previous phi, lambda, and the two kernel values
+        ## idx - where we are on the diagonal
+        def fn(prev_vals, idx, data_idxs, DATAPH, DATAPRIMEPH, qtph, qtprimeph):
+
             xTP = DATAPRIMEPH[data_idxs[0][0]]
             xT = DATAPH[data_idxs[0][1]]
             xINNER = T.inner(xT, xTP)
-            # XTP = xTP*xTP[:, None] ## eq to <x^t, x^t> // inner product
-            # XT = xT*xT[:, None]
 
-            # tiprime_iter = d1idx + idx
-            # ti_iter = d2idx + idx
             prev_lambda = prev_vals[0]
             prev_phi = prev_vals[1]
             prev_K = prev_vals[2]
@@ -173,9 +171,9 @@ class RNTK():
             new_phi = new_lambda + self.sw ** 2 * prev_phi * D
 
             #compute kernels
-            S_kernel, D_kernel = self.alg2_VT(qtph[data_idxs[0][1]], qtprimeph[data_idxs[0][0]])
-            ret_K = prev_K + self.sv^2 * S_kernel#get current lamnda, get current qtph and qtprimeph
-            ret_theta = prev_theta + self.sv^2 * S_kernel + self.sv^2 * D_kernel * new_phi #TODO
+            S_kernel, D_kernel = self.alg2_VT(qtph[data_idxs[0][1]], qtprimeph[data_idxs[0][0]], new_lambda)
+            ret_K = prev_K + self.sv**2 * S_kernel#get current lamnda, get current qtph and qtprimeph
+            ret_theta = prev_theta + self.sv**2 * S_kernel + self.sv**2 * D_kernel * new_phi #TODO
 
             if idx in self.ends_of_calced_diags:
                 xTP_NEXT = DATAPH[data_idxs[1][0]]
@@ -201,6 +199,8 @@ class RNTK():
         # return self.compute_kernels(all_ema)
     
     def add_boundary_kernels(self, inside_kernels):
+        #first thing to do - find indexes of boundary conditions (this is simple, we already have it)
+
         return inside_kernels # TODO
 
     def reorganize_data(self, printbool = False):
@@ -209,6 +209,7 @@ class RNTK():
         for diag_idx in range(1, self.dim_num - 1):
             TiP = TiPrimes[diag_idx]
             Ti = Tis[diag_idx]
+
             dim_len = self.dim_lengths[diag_idx]
             for diag_pos in range(1, int(dim_len)):
                 # we should never see 0 here, since those are reserved for boundary conditions
@@ -244,30 +245,29 @@ class RNTK():
     #     return T.concatenate([prepended, T.expand_dims(self.boundary_condition, axis = 0)])
 
 
+    # def compute_kernels(self, final_ema):
 
-    def compute_kernels(self, final_ema):
+    #     diag_ends = self.get_ends_of_diags(final_ema)
 
-        diag_ends = self.get_ends_of_diags(final_ema)
+    #     S_init, D_init = self.alg1_VT(diag_ends[0][0])
+    #     init_Kappa  = self.sv ** 2 * S_init
+    #     init_Theta = init_Kappa + self.sv ** 2 * diag_ends[0][1] * D_init
+    #     init_list = T.concatenate([T.expand_dims(init_Kappa, axis = 0), T.expand_dims(init_Theta, axis = 0)])
 
-        S_init, D_init = self.alg1_VT(diag_ends[0][0])
-        init_Kappa  = self.sv ** 2 * S_init
-        init_Theta = init_Kappa + self.sv ** 2 * diag_ends[0][1] * D_init
-        init_list = T.concatenate([T.expand_dims(init_Kappa, axis = 0), T.expand_dims(init_Theta, axis = 0)])
+    #     def map_test(gp_rntk_sum, gp_rntk):
+    #         S, D = self.alg1_VT(gp_rntk[0])
+    #         ret1 = self.sv ** 2 * S
+    #         ret2 = ret1 + self.sv ** 2 * gp_rntk[1] * D
+    #         gp_rntk_sum = T.index_add(gp_rntk_sum,0, ret1)
+    #         gp_rntk_sum = T.index_add(gp_rntk_sum,1, ret2)
 
-        def map_test(gp_rntk_sum, gp_rntk):
-            S, D = self.alg1_VT(gp_rntk[0])
-            ret1 = self.sv ** 2 * S
-            ret2 = ret1 + self.sv ** 2 * gp_rntk[1] * D
-            gp_rntk_sum = T.index_add(gp_rntk_sum,0, ret1)
-            gp_rntk_sum = T.index_add(gp_rntk_sum,1, ret2)
+    #         return gp_rntk_sum, gp_rntk_sum
 
-            return gp_rntk_sum, gp_rntk_sum
-
-        final_K_T, inter_results = T.scan(
-                    map_test, init =  init_list, sequences=[diag_ends[1:]]
-                )
-        self.test = final_K_T
-        return final_K_T
+    #     final_K_T, inter_results = T.scan(
+    #                 map_test, init =  init_list, sequences=[diag_ends[1:]]
+    #             )
+    #     self.test = final_K_T
+    #     return final_K_T
 
 
     # def no_bc_arrays_to_diag(self, input_array):
