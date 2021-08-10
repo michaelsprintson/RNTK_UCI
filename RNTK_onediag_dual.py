@@ -37,9 +37,9 @@ class RNTK():
             self.DATA = DATA
             self.DATAPRIME = DATAPRIME
             self.N = int(dic["n_patrons1="])
-        self.sw = 1 #sqrt 2 (1.4) - FIXED
-        self.su = 1 #[0.1,0.5,1] - SEARCH
-        self.sb = 1 #[0, 0.2, 0.5] - SEARCH
+        self.sw = 1.142 #sqrt 2 (1.4) - FIXED
+        self.su = 0.5 #[0.1,0.5,1] - SEARCH
+        self.sb = 0.1 #[0, 0.2, 0.5] - SEARCH
         self.sh = 1 #[0, 0.5, 1] - SEARCH
         self.sv = 1 #1 - FIXED
         self.L = 1 #1 - FIXED
@@ -59,7 +59,7 @@ class RNTK():
             length_betw = (self.dim_lengths - 1)[1:-1]
             self.ends_of_calced_diags = np.array([sum(length_betw[:j]) for j in range(0, len(length_betw)+1)])[1:] - 1
 
-    def alg1_VT(self, M): #here i will use M as the previous little q ////// NxN, same value for every row
+    def alg1_VT_dep(self, M): #here i will use M as the previous little q ////// NxN, same value for every row
         A = T.diag(M)  # GP_old is in R^{n*n} having the output gp kernel
         # of all pairs of data in the data set
         B = A * A[:, None]
@@ -68,6 +68,11 @@ class RNTK():
         E = T.clip(D, -1, 1)  # clipping E between -1 and 1 for numerical stability.
         F = (1 / (2 * np.pi)) * (E * (np.pi - T.arccos(E)) + T.sqrt(1 - E ** 2)) * C
         G = (np.pi - T.arccos(E)) / (2 * np.pi)
+        return F,G
+
+    def alg1_VT(self, Q):
+        F = Q/2;
+        G = 0.5*(Q/Q)
         return F,G
 
     def alg2_VT(self, Qx, Qxprime, M): #K1, K2, K3
@@ -93,7 +98,7 @@ class RNTK():
             # S, _ = self.alg1_VT(prevq) # -> M is K3 
             S = prevq
             # newq = self.su * 2 * T.linalg.norm(T.expand_dims(xz, axis = 0), ord = 2, axis = 0) + self.sb**2 + self.sh**2
-            newq = self.sw*2 * S + self.su * 2 * T.linalg.norm(T.expand_dims(MINIDATAT, axis = 0), ord = 2, axis = 0) + self.sb**2#TODO: same vectorization (pointwise on MINIDATAT)
+            newq = self.sw*2 * S + self.su * 2 * T.linalg.norm(T.expand_dims(MINIDATAT, axis = 0), ord = 2, axis = 0) + self.sb**2
             # print("newq", newq)
             return newq, newq
         
@@ -178,12 +183,16 @@ class RNTK():
             S, D = self.alg2_VT(qtph[data_idxs[0][1] - 1], qtprimeph[data_idxs[0][0] - 1] ,prev_lambda)
             new_lambda = self.sw ** 2 * S + self.su ** 2 * xINNER + self.sb ** 2 ## took out an X
             new_phi = new_lambda + self.sw ** 2 * prev_phi * D
+            # new_phi = prev_phi
+            # new_lambda = prev_lambda
 
             #compute kernels
             S_kernel, D_kernel = self.alg2_VT(qtph[data_idxs[0][1]], qtprimeph[data_idxs[0][0]], new_lambda)
             ret_K = prev_K + self.sv**2 * S_kernel#get current lamnda, get current qtph and qtprimeph
             ret_theta = prev_theta + self.sv**2 * S_kernel + self.sv**2 * D_kernel * new_phi #TODO
-            
+            # ret_K = prev_K
+            # ret_theta = prev_theta
+
             # ret_K, ret_theta = self.compute_kernels(self.qt, self.qtprime, data_idxs[0][1], data_idxs[0][0] - 1, new_lambda, new_phi, prev_K, prev_lambda)
 
             if idx in self.ends_of_calced_diags:
