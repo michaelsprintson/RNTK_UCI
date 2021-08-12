@@ -152,7 +152,6 @@ class RNTK():
 
         NEW_DATA = self.reorganize_data()
         NEW_DATA_ATTACHED = jnp.array(list(zip(NEW_DATA[:-1], NEW_DATA[1:])))
-        # print(NEW_DATA_ATTACHED)
 
         x = self.DATA[:,0]
         X = x*x[:, None]
@@ -160,10 +159,10 @@ class RNTK():
         boundary_condition = self.make_boundary_condition(X)
         
         # #lets create the inital kernels - should be starting with top right
-        temp_K, temp_theta = self.compute_kernels(self.qt, self.qtprime, 0, self.dim_1, boundary_condition, boundary_condition, T.empty((self.N, self.N)), T.empty((self.N, self.N)))
-        init_K, init_theta = self.compute_kernels(self.qt, self.qtprime, 0, self.dim_1 - 1, boundary_condition, boundary_condition, temp_K, temp_theta)
+        # temp_K, temp_theta = self.compute_kernels(self.qt, self.qtprime, 0, self.dim_1, boundary_condition, boundary_condition, T.empty((self.N, self.N)), T.empty((self.N, self.N)))
+        # init_K, init_theta = self.compute_kernels(self.qt, self.qtprime, 0, self.dim_1 - 1, boundary_condition, boundary_condition, temp_K, temp_theta)
 
-        initial_conditions = create_T_list([boundary_condition, boundary_condition, init_K, init_theta])
+        initial_conditions = create_T_list([T.empty((self.N, self.N)), T.empty((self.N, self.N)), T.empty((self.N, self.N)), T.empty((self.N, self.N)) + 2])
         # initial_conditions = create_T_list([boundary_condition, boundary_condition, T.empty((self.N, self.N)), T.empty((self.N, self.N))])
         
         ## prev_vals - (4,self.N,self.N) - previous phi, lambda, and the two kernel values
@@ -181,38 +180,39 @@ class RNTK():
             ## not boundary condition
             # print(qtph[data_idxs[0][1] - 1])
             # print(qtprimeph[data_idxs[0][0] - 1])
-            S, D = self.alg2_VT(qtph[data_idxs[0][1] - 1], qtprimeph[data_idxs[0][0] - 1] ,prev_lambda)
-            new_lambda = self.sw ** 2 * S + self.su ** 2 * xINNER + self.sb ** 2 ## took out an X
-            new_phi = new_lambda + self.sw ** 2 * prev_phi * D
-            # new_phi = prev_phi
-            # new_lambda = prev_lambda
+            # S, D = self.alg2_VT(qtph[data_idxs[0][1] - 1], qtprimeph[data_idxs[0][0] - 1] ,prev_lambda)
+            # new_lambda = self.sw ** 2 * S + self.su ** 2 * xINNER + self.sb ** 2 ## took out an X
+            # new_phi = new_lambda + self.sw ** 2 * prev_phi * D
+            new_lambda = prev_lambda
+            new_phi = prev_phi
 
-            #compute kernels
-            S_kernel, D_kernel = self.alg2_VT(qtph[data_idxs[0][1]], qtprimeph[data_idxs[0][0]], new_lambda)
-            new_K = prev_K + self.sv**2 * S_kernel#get current lamnda, get current qtph and qtprimeph
-            new_theta = prev_theta + self.sv**2 * S_kernel + self.sv**2 * D_kernel * new_phi #TODO
-            # ret_K = prev_K
-            # ret_theta = prev_theta
+            # #compute kernels
+            # S_kernel, D_kernel = self.alg2_VT(qtph[data_idxs[0][1]], qtprimeph[data_idxs[0][0]], new_lambda)
+            # new_K = prev_K + self.sv**2 * S_kernel#get current lamnda, get current qtph and qtprimeph
+            # new_theta = prev_theta + self.sv**2 * S_kernel + self.sv**2 * D_kernel * new_phi #TODO
+ 
+            new_K = prev_K + 1
+            new_theta = prev_theta
 
             equal_check = lambda e: T.equal(idx, e)
 
             equal_result = sum(np.vectorize(equal_check)(self.ends_of_calced_diags)) 
 
-            def true_f(l,p,k,t, qp, gph, dataph, dataprimeph, di): 
-                xTP_NEXT = dataprimeph[di[1][0]]
-                xT_NEXT = dataph[di[1][1]]
+            def true_f(l,p,k,t, qp, gph): 
+                xTP_NEXT = DATAPRIMEPH[data_idxs[1][0]]
+                xT_NEXT = DATAPH[data_idxs[1][1]]
                 xINNER_NEXT = T.inner(xT_NEXT, xTP_NEXT)
                 new_bc = self.make_boundary_condition(xINNER_NEXT)
                 ret_lambda = ret_phi = new_bc 
 
-                S_bc_kernel, D_bc_kernel = self.alg2_VT(qp[di[1][1]], gph[di[1][0]], ret_lambda)
-                ret_K = k + self.sv**2 * S_bc_kernel#get current lamnda, get current qtph and qtprimeph
-                ret_theta = t + self.sv**2 * S_bc_kernel + self.sv**2 * D_bc_kernel * ret_phi #TODO
+                # S_bc_kernel, D_bc_kernel = self.alg2_VT(qp[data_idxs[1][1]], gph[data_idxs[1][0]], ret_lambda)
+                # ret_K = k + self.sv**2 * S_bc_kernel#get current lamnda, get current qtph and qtprimeph
+                # ret_theta = t + self.sv**2 * S_bc_kernel + self.sv**2 * D_bc_kernel * ret_phi #TODO
 
-                return ret_lambda, ret_phi, ret_K, ret_theta
+                return ret_lambda, p, k, t + 1
             false_f = lambda l,p,k,t: (l,p,k,t)
 
-            ret_lambda, ret_phi, ret_K, ret_theta = T.cond(T.equal(equal_result, 1), true_f, false_f, [new_lambda, new_phi, new_K, new_theta, qtph, qtprimeph, DATAPH, DATAPRIMEPH, data_idxs], [new_lambda, new_phi, new_K, new_theta])
+            ret_lambda, ret_phi, ret_K, ret_theta = T.cond(T.equal(equal_result, 1), true_f, false_f, [new_lambda, new_phi, new_K, new_theta, qtph, qtprimeph], [new_lambda, new_phi, new_K, new_theta])
             
             to_carry = create_T_list([ret_lambda, ret_phi, ret_K, ret_theta])
             # print('got poast second create list')
