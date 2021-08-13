@@ -72,8 +72,8 @@ class RNTK():
 
     def alg1_VT(self, Q):
         F = Q/2;
-        G = 0.5*(Q/Q)
-        return F,G
+        # G = 0.5*(Q/Q)
+        return F
 
     def alg2_VT(self, Qx, Qxprime, M): #K1, K2, K3
         B = T.outer(Qx, Qxprime)
@@ -95,8 +95,8 @@ class RNTK():
         def scan_func(prevq, MINIDATAT): #MINIDATAT shuold be a vector of lenght N
             # print(MINIDATAT)
             # the trick to this one is to use the original VT
-            # S, _ = self.alg1_VT(prevq) # -> M is K3 
-            S = prevq
+            S = self.alg1_VT(prevq) # -> M is K3 
+            # S = prevq
             # newq = self.su * 2 * T.linalg.norm(T.expand_dims(xz, axis = 0), ord = 2, axis = 0) + self.sb**2 + self.sh**2
             newq = self.sw*2 * S + self.su * 2 * T.linalg.norm(T.expand_dims(MINIDATAT, axis = 0), ord = 2, axis = 0) + self.sb**2
             # print("newq", newq)
@@ -164,7 +164,7 @@ class RNTK():
         init_K, init_theta = self.compute_kernels(self.qt, self.qtprime, 0, self.dim_1 - 1, boundary_condition, boundary_condition, temp_K, temp_theta)
 
         initial_conditions = create_T_list([boundary_condition, boundary_condition, init_K, init_theta])
-        # initial_conditions = create_T_list([boundary_condition, boundary_condition, T.empty((self.N, self.N)), T.empty((self.N, self.N))])
+        # initial_conditions = create_T_list([T.empty((self.N, self.N)), T.empty((self.N, self.N)), T.empty((self.N, self.N)), T.empty((self.N, self.N)) + 2])
         
         ## prev_vals - (4,self.N,self.N) - previous phi, lambda, and the two kernel values
         ## idx - where we are on the diagonal
@@ -196,9 +196,9 @@ class RNTK():
 
             equal_check = lambda e: T.equal(idx, e)
 
-            equal_result = sum(np.vectorize(equal_check)(self.ends_of_calced_diags)) 
+            equal_result = sum(np.vectorize(equal_check)(self.ends_of_calced_diags)) > 0
 
-            def true_f(l,p,k,t, qp, gph, dataph, dataprimeph, di): 
+            def true_f(k,t, qp, gph, dataph, dataprimeph, di): 
                 xTP_NEXT = dataprimeph[di[1][0]]
                 xT_NEXT = dataph[di[1][1]]
                 xINNER_NEXT = T.inner(xT_NEXT, xTP_NEXT)
@@ -212,7 +212,7 @@ class RNTK():
                 return ret_lambda, ret_phi, ret_K, ret_theta
             false_f = lambda l,p,k,t: (l,p,k,t)
 
-            ret_lambda, ret_phi, ret_K, ret_theta = T.cond(T.equal(equal_result, 1), true_f, false_f, [new_lambda, new_phi, new_K, new_theta, qtph, qtprimeph, DATAPH, DATAPRIMEPH, data_idxs], [new_lambda, new_phi, new_K, new_theta])
+            ret_lambda, ret_phi, ret_K, ret_theta = T.cond(equal_result, true_f, false_f, [new_K, new_theta, qtph, qtprimeph, DATAPH, DATAPRIMEPH, data_idxs], [new_lambda, new_phi, new_K, new_theta])
             
             to_carry = create_T_list([ret_lambda, ret_phi, ret_K, ret_theta])
             # print('got poast second create list')
